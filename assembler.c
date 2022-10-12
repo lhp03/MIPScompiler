@@ -9,7 +9,7 @@
  * For debug option. If you want to debug, set 1.
  * If not, set 0.
  */
-#define DEBUG 0
+#define DEBUG 1
 
 #define MAX_SYMBOL_TABLE_SIZE 1024
 #define MEM_TEXT_START 0x00400000
@@ -342,53 +342,67 @@ void make_symbol_table(FILE *input)
             {
                 sscanf(line, "%[^:]:\t%[^\n]", name, temp_seg);
 
-                printf("name : %s ", name);
-                printf("seg: %s ", temp_seg);
-
                 symbol_t new_symbol;
                 strcpy(new_symbol.name, name);
                 new_symbol.address = address;
                 symbol_table_add_entry(new_symbol);
-                printf("address : 0x%x\n", SYMBOL_TABLE[symbol_table_cur_index - 1].address);
             }
             else
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
-                printf("seg: %s\n", temp_seg);
             }
 
-            replaceVal(temp_seg);
-            fprintf(data_seg, temp_seg);
+            char *result = replaceVal(temp_seg);
+            fprintf(data_seg, "%s\n", result);
+            free(result);
+
+            data_section_size += BYTES_PER_WORD;
         }
         else if (cur_section == TEXT)
         {
             if (address > MEM_DATA_START)
             {
-                printf("TEXTSECTION\n");
                 address = MEM_TEXT_START;
             }
 
             if (line[0] != '\t')
             {
                 sscanf(line, "%[^:]\n", name);
-                printf("name: %s ", name);
-                printf("address : 0x%x \n", address);
+
                 symbol_t new_symbol;
                 strcpy(new_symbol.name, name);
                 new_symbol.address = address;
+
                 symbol_table_add_entry(new_symbol);
             }
             else
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
                 char *result = replaceVal(temp_seg);
-                fprintf(text_seg, result);
-                printf("seg: %s \n", result);
+                fprintf(text_seg, "%s\n", result);
                 free(result);
             }
+
+            text_section_size += BYTES_PER_WORD;
         }
 
         address += BYTES_PER_WORD;
+    }
+
+    rewind(data_seg);
+    rewind(text_seg);
+
+    printf("data_seg\n");
+    while (fgets(line, 1024, data_seg) != NULL)
+    {
+        printf("%s", line);
+    }
+
+    printf("text_seg\n");
+    while (fgets(line, 1024, text_seg) != NULL)
+    {
+
+        printf("%s", line);
     }
 }
 
