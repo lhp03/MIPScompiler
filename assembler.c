@@ -72,6 +72,8 @@ inst_t inst_list[INST_LIST_LEN] = {
     {"subu", "000000", 'R', "100011"}  //   21
 };
 
+// r -> default rd rs rt, except: jr(rs), sll, srl(rd, rt shamt)
+// i -> default rt rs imm, except: https://devbelly.tistory.com/279
 symbol_t SYMBOL_TABLE[MAX_SYMBOL_TABLE_SIZE]; // Global Symbol Table
 
 uint32_t symbol_table_cur_index = 0; // For indexing of symbol table
@@ -165,6 +167,7 @@ void record_text_section(FILE *output)
         {
         case 'R':
             /* blank */
+            // inst rd rs rt
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d rd:$%d shamt:%d funct:%s\n",
                    op, rs, rt, rd, shamt, inst_list[idx].funct);
@@ -366,6 +369,8 @@ void make_symbol_table(FILE *input)
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
             }
+
+            fprintf(data_seg, "%s\n", temp_seg);
 
             data_section_size += BYTES_PER_WORD;
         }
