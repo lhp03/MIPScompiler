@@ -258,15 +258,31 @@ char *replaceWord(const char *s, const char *oldW,
     return result;
 }
 
-char *replaceVal(char *seg)
+char *laToLuiOri(char *seg)
 {
     char *result = seg;
+
     for (int i = 0; i < (int)symbol_table_cur_index; i++)
     {
-        char temp_address[32];
-        sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
-        // printf("%s\n", temp_address);
-        result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
+        if (strstr(seg, SYMBOL_TABLE[i].name) != NULL)
+        {
+
+            if (SYMBOL_TABLE[i].address >= 0x00010000)
+            {
+                result = replaceWord(result, "la", "lui");
+            }
+            else
+            {
+                result = replaceWord(result, "la", "ori");
+            }
+
+            char temp_address[32];
+            sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
+
+            // printf("%s\n", temp_address);
+            result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
+            break;
+        }
     }
 
     return result;
@@ -334,7 +350,6 @@ void make_symbol_table(FILE *input)
         {
             if (address < MEM_DATA_START)
             {
-                printf("DATASECTION\n");
                 address = MEM_DATA_START;
             }
 
@@ -351,10 +366,6 @@ void make_symbol_table(FILE *input)
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
             }
-
-            char *result = replaceVal(temp_seg);
-            fprintf(data_seg, "%s\n", result);
-            free(result);
 
             data_section_size += BYTES_PER_WORD;
         }
@@ -378,12 +389,22 @@ void make_symbol_table(FILE *input)
             else
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
-                char *result = replaceVal(temp_seg);
+                char *result;
+                if (strstr(temp_seg, "la") != NULL)
+                {
+                    result = laToLuiOri(temp_seg);
+                }
+                else
+                {
+                    result = malloc(sizeof(char) * 32);
+                    strcpy(result, temp_seg);
+                }
+
                 fprintf(text_seg, "%s\n", result);
                 free(result);
-            }
 
-            text_section_size += BYTES_PER_WORD;
+                text_section_size += BYTES_PER_WORD;
+            }
         }
 
         address += BYTES_PER_WORD;
