@@ -138,8 +138,36 @@ char *num_to_bits(unsigned int num, int len)
     return bits;
 }
 
-int stringToInt(char *num)
+int strToInt(char *num)
 {
+    if (num[0] == '0' && num[1] == 'x')
+    {
+        char *ptr = num;
+        ptr += 2;
+        int n = 0;
+
+        while (*ptr)
+        {
+            if (*ptr >= 'A' && *ptr <= 'F')
+            {
+                n = n * 16 + *ptr - 'A' + 10;
+            }
+            else if (*ptr >= '0' && *ptr <= '9')
+            {
+                n = n * 16 + *ptr - '0';
+            }
+            else
+            {
+                return NULL;
+            }
+            ptr++;
+        }
+        return n;
+    }
+    else
+    {
+        return atoi(num);
+    }
 }
 
 /* Record .text section to output file */
@@ -185,23 +213,36 @@ void record_text_section(FILE *output)
 
         type = inst_list[idx].type;
 
+        char temp_rs[16] = {0};
+        char temp_rt[16] = {0};
+        char temp_rd[16] = {0};
+        char temp_shamt[16] = {0};
+        char temp_imm[16] = {0};
+        char temp_addr[16] = {0};
+
         switch (type)
         {
         case 'R':
+
             // rd rs rt
             // r except: jr, srl, sll
             if (strcmp(inst_list[idx].name, "jr") == 0)
             {
-                sscanf(line, "%s $%d", temp_inst, &rs);
+                sscanf(line, "%[^\t] $%[^\n]", temp_inst, temp_rs);
             }
             else if (strcmp(inst_list[idx].name, "sll") == 0 || strcmp(inst_list[idx].name, "srl") == 0)
             {
-                sscanf(line, "%s $%d, $%d, %d", temp_inst, &rd, &rt, &shamt);
+                sscanf(line, "%[^\t] $%[^,], $%[^,], %[^\n]", temp_inst, temp_rd, temp_rt, temp_shamt);
             }
             else
             {
-                sscanf(line, "%s $%d, $%d, $%d", temp_inst, &rd, &rs, &rt);
+                sscanf(line, "%[^\t] $%[^,], $%[^,], $%[^\n]", temp_inst, temp_rd, temp_rs, temp_rt);
             }
+
+            rs = strToInt(temp_rs);
+            rt = strToInt(temp_rt);
+            rd = strToInt(temp_rd);
+            shamt = strToInt(temp_shamt);
 
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(rs, 5));
@@ -213,24 +254,38 @@ void record_text_section(FILE *output)
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d rd:$%d shamt:%d funct:%s\n",
                    op, rs, rt, rd, shamt, inst_list[idx].funct);
+            printf("op:%s rs:$%s rt:$%s rd:$%s shamt:%s funct:%s\n",
+                   op, temp_rs, temp_rt, temp_rd, temp_shamt, inst_list[idx].funct);
 #endif
             break;
 
         case 'I':
             // i -> default rt rs imm,
             // except lui rt imm / lw, sw rt imm(rs) /
+
             if (strcmp(inst_list[idx].name, "lui") == 0)
             {
-                sscanf(line, "%s $%d %d", temp_inst, &rt, &imm);
+                sscanf(line, "%[^\t] $%[^,], %[^\n]", temp_inst, temp_rt, temp_imm);
             }
             else if (strcmp(inst_list[idx].name, "lw") == 0 || strcmp(inst_list[idx].name, "sw") == 0)
             {
-                sscanf(line, "%s $%d, %d($%d)", temp_inst, &rt, &imm, &rs);
+                sscanf(line, "%[^\t] $%[^,], %[^(]($%[^)])", temp_inst, temp_rt, temp_imm, temp_rs);
             }
+            else if (strcmp(inst_list[idx].name, "bne") == 0 || strcmp(inst_list[idx].name, "beq") == 0)
+            {
+                sscanf(line, "%[^\t] $%[^,], $%[^,], %[^\n]", temp_inst, temp_rs, temp_rt, temp_imm);
+            }
+
             else
             {
-                sscanf(line, "%s $%d, $%d, %d", temp_inst, &rt, &rs, &imm);
+                sscanf(line, "%[^\t] $%[^,], $%[^,], %[^\n]", temp_inst, temp_rt, temp_rs, temp_imm);
             }
+
+            rs = strToInt(temp_rs);
+            rt = strToInt(temp_rt);
+            imm = strToInt(temp_imm);
+
+            printf("----------------rs: %d, rt: %d-------------------------\n", rs, rt);
 
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(rs, 5));
@@ -239,16 +294,21 @@ void record_text_section(FILE *output)
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d imm:0x%x\n",
                    op, rs, rt, imm);
+            printf("op:%s rs:$%s rt:$%s imm:%s\n",
+                   op, temp_rs, temp_rt, temp_imm);
 #endif
             break;
 
         case 'J':
-            sscanf(line, "%s %x", temp_inst, &addr);
+            sscanf(line, "%[^\t] %[^\n]", temp_inst, temp_addr);
+
+            addr = strToInt(temp_addr);
 
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(addr, 26));
 #if DEBUG
             printf("op:%s addr:%i\n", op, addr);
+            printf("op:%s addr:%s\n", op, temp_addr);
 #endif
             break;
 
@@ -275,10 +335,13 @@ void record_data_section(FILE *output)
     while (fgets(line, 1024, data_seg) != NULL)
     {
         char temp_name[32];
-        int temp_word = 0;
+        char temp_word[16] = {0};
+        int num = 0;
 
-        sscanf(line, "%s %d", temp_name, &temp_word);
-        char *data_bits = num_to_bits(temp_word, 32);
+        sscanf(line, "%s %s", temp_name, temp_word);
+        num = strToInt(temp_word);
+
+        char *data_bits = num_to_bits(num, 32);
 
 #if DEBUG
         printf("0x%08x: ", cur_addr);
@@ -393,26 +456,38 @@ void laToLuiOri(FILE *text_seg)
 
     while (fgets(line, 1024, text_seg) != NULL)
     {
-        char wLine[32] = {0};
+        char wLine[128] = {0};
         if (line[0] == 'l' && line[1] == 'a')
         {
             char temp_line[64];
             int temp_reg = 0;
-            int temp_addr = 0;
-            sscanf(line, "%s $%d, 0x%8x", temp_line, &temp_reg, &temp_addr);
-            sscanf(line, "%s %[^\n]", temp_line, temp_line);
+            sscanf(line, "%s $%d, %[^\n]", temp_line, &temp_reg, temp_line);
 
-            if (temp_addr >= 0x0001)
+            char temp_upper[16] = {0};
+            char temp_lower[16] = {0};
+
+            strncpy(temp_upper, temp_line + (strlen(temp_line) - 8), 4);
+            strncpy(temp_lower, temp_line + (strlen(temp_line) - 4), 4);
+
+            printf("upper %s, lower %s rs: %d\n", temp_upper, temp_lower, temp_reg);
+
+            int upper_flag = 0;
+            if (strcmp(temp_upper, "0000") != 0)
             {
-                strcpy(wLine, "lui\t");
+                sprintf(temp_line, "lui\t$%d, 0x%s\n", temp_reg, temp_upper);
                 strcat(wLine, temp_line);
+                upper_flag = 1;
             }
-            else
+
+            if (strcmp(temp_lower, "0000") != 0 || upper_flag == 0)
             {
-                strcpy(wLine, "ori\t");
+                sprintf(temp_line, "ori\t$%d, $%d 0x%s\n", temp_reg, temp_reg, temp_lower);
                 strcat(wLine, temp_line);
+                if (upper_flag == 1)
+                {
+                    text_section_size += BYTES_PER_WORD;
+                }
             }
-            strcat(wLine, "\n");
         }
         else
         {
