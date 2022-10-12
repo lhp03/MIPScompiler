@@ -48,32 +48,34 @@ enum section
 
 inst_t inst_list[INST_LIST_LEN] = {
     //  idx
-    {"add", "000000", 'R', "100000"},  //    0
-    {"sub", "000000", 'R', "100010"},  //    1
-    {"addiu", "001001", 'I', ""},      //    2
-    {"addu", "000000", 'R', "100001"}, //    3
-    {"and", "000000", 'R', "100100"},  //    4
-    {"andi", "001100", 'I', ""},       //    5
-    {"beq", "000100", 'I', ""},        //    6
-    {"bne", "000101", 'I', ""},        //    7
-    {"j", "000010", 'J', ""},          //    8
-    {"jal", "000011", 'J', ""},        //    9
-    {"jr", "000000", 'R', "001000"},   //   10
-    {"lui", "001111", 'I', ""},        //   11
-    {"lw", "100011", 'I', ""},         //   12
-    {"nor", "000000", 'R', "100111"},  //   13
-    {"or", "000000", 'R', "100101"},   //   14
-    {"ori", "001101", 'I', ""},        //   15
-    {"sltiu", "001011", 'I', ""},      //   16
-    {"sltu", "000000", 'R', "101011"}, //   17
-    {"sll", "000000", 'R', "000000"},  //   18
-    {"srl", "000000", 'R', "000010"},  //   19
-    {"sw", "101011", 'I', ""},         //   20
-    {"subu", "000000", 'R', "100011"}  //   21
+    {"add", "000000", 'R', "100000"},  //    0      rd rs rt
+    {"sub", "000000", 'R', "100010"},  //    1      rd rs rt
+    {"addiu", "001001", 'I', ""},      //    2      rt rs imm
+    {"addu", "000000", 'R', "100001"}, //    3      rd rs rt
+    {"and", "000000", 'R', "100100"},  //    4      rd rs rt
+    {"andi", "001100", 'I', ""},       //    5      rt rs imm
+    {"beq", "000100", 'I', ""},        //    6      rs rt imm
+    {"bne", "000101", 'I', ""},        //    7      rs rt imm
+    {"j", "000010", 'J', ""},          //    8      address
+    {"jal", "000011", 'J', ""},        //    9      address
+    {"jr", "000000", 'R', "001000"},   //   10      rs
+    {"lui", "001111", 'I', ""},        //   11      rt imm
+    {"lw", "100011", 'I', ""},         //   12      rt imm(rs)
+    {"nor", "000000", 'R', "100111"},  //   13      rd rs rt
+    {"or", "000000", 'R', "100101"},   //   14      rd rs rt
+    {"ori", "001101", 'I', ""},        //   15      rt rs imm
+    {"sltiu", "001011", 'I', ""},      //   16      rt rs imm
+    {"sltu", "000000", 'R', "101011"}, //   17      rd rs rt
+    {"sll", "000000", 'R', "000000"},  //   18      rd rt shamt
+    {"srl", "000000", 'R', "000010"},  //   19      rd rt shamt
+    {"sw", "101011", 'I', ""},         //   20      rt imm(rs)
+    {"subu", "000000", 'R', "100011"}  //   21      rd rs rt
 };
 
-// r -> default rd rs rt, except: jr(rs), sll, srl(rd, rt shamt)
-// i -> default rt rs imm, except: https://devbelly.tistory.com/279
+// r except: jr, srl, sll
+// i -> default rt rs imm,
+// except lui rt imm / lw, sw rt imm(rs) /
+// j default
 symbol_t SYMBOL_TABLE[MAX_SYMBOL_TABLE_SIZE]; // Global Symbol Table
 
 uint32_t symbol_table_cur_index = 0; // For indexing of symbol table
@@ -136,6 +138,10 @@ char *num_to_bits(unsigned int num, int len)
     return bits;
 }
 
+int stringToInt(char *num)
+{
+}
+
 /* Record .text section to output file */
 void record_text_section(FILE *output)
 {
@@ -160,14 +166,50 @@ void record_text_section(FILE *output)
 #if DEBUG
         printf("0x%08x: ", cur_addr);
 #endif
-        /* Find the instruction type that matches the line */
-        /* blank */
+
+        char inst_bits[33];
+        inst_bits[0] = '\0';
+
+        char temp_inst[32];
+
+        sscanf(line, "%s", temp_inst);
+
+        for (i = 0; i < INST_LIST_LEN; i++)
+        {
+            if (strcmp(temp_inst, inst_list[i].name) == 0)
+            {
+                idx = i;
+                break;
+            }
+        }
+
+        type = inst_list[idx].type;
 
         switch (type)
         {
         case 'R':
-            /* blank */
-            // inst rd rs rt
+            // rd rs rt
+            // r except: jr, srl, sll
+            if (strcmp(inst_list[idx].name, "jr") == 0)
+            {
+                sscanf(line, "%s $%d", temp_inst, &rs);
+            }
+            else if (strcmp(inst_list[idx].name, "sll") == 0 || strcmp(inst_list[idx].name, "srl") == 0)
+            {
+                sscanf(line, "%s $%d, $%d, %d", temp_inst, &rd, &rt, &shamt);
+            }
+            else
+            {
+                sscanf(line, "%s $%d, $%d, $%d", temp_inst, &rd, &rs, &rt);
+            }
+
+            strcat(inst_bits, inst_list[idx].op);
+            strcat(inst_bits, num_to_bits(rs, 5));
+            strcat(inst_bits, num_to_bits(rt, 5));
+            strcat(inst_bits, num_to_bits(rd, 5));
+            strcat(inst_bits, num_to_bits(shamt, 5));
+            strcat(inst_bits, inst_list[idx].funct);
+
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d rd:$%d shamt:%d funct:%s\n",
                    op, rs, rt, rd, shamt, inst_list[idx].funct);
@@ -175,7 +217,25 @@ void record_text_section(FILE *output)
             break;
 
         case 'I':
-            /* blank */
+            // i -> default rt rs imm,
+            // except lui rt imm / lw, sw rt imm(rs) /
+            if (strcmp(inst_list[idx].name, "lui") == 0)
+            {
+                sscanf(line, "%s $%d %d", temp_inst, &rt, &imm);
+            }
+            else if (strcmp(inst_list[idx].name, "lw") == 0 || strcmp(inst_list[idx].name, "sw") == 0)
+            {
+                sscanf(line, "%s $%d, %d($%d)", temp_inst, &rt, &imm, &rs);
+            }
+            else
+            {
+                sscanf(line, "%s $%d, $%d, %d", temp_inst, &rt, &rs, &imm);
+            }
+
+            strcat(inst_bits, inst_list[idx].op);
+            strcat(inst_bits, num_to_bits(rs, 5));
+            strcat(inst_bits, num_to_bits(rt, 5));
+            strcat(inst_bits, num_to_bits(imm, 16));
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d imm:0x%x\n",
                    op, rs, rt, imm);
@@ -183,7 +243,10 @@ void record_text_section(FILE *output)
             break;
 
         case 'J':
-            /* blank */
+            sscanf(line, "%s %x", temp_inst, &addr);
+
+            strcat(inst_bits, inst_list[idx].op);
+            strcat(inst_bits, num_to_bits(addr, 26));
 #if DEBUG
             printf("op:%s addr:%i\n", op, addr);
 #endif
@@ -192,8 +255,9 @@ void record_text_section(FILE *output)
         default:
             break;
         }
-        fprintf(output, "\n");
 
+        fprintf(output, "%s", inst_bits);
+        fprintf(output, "\n");
         cur_addr += BYTES_PER_WORD;
     }
 }
@@ -210,11 +274,17 @@ void record_data_section(FILE *output)
     /* Print .data section */
     while (fgets(line, 1024, data_seg) != NULL)
     {
-        /* blank */
+        char temp_name[32];
+        int temp_word = 0;
+
+        sscanf(line, "%s %d", temp_name, &temp_word);
+        char *data_bits = num_to_bits(temp_word, 32);
+
 #if DEBUG
         printf("0x%08x: ", cur_addr);
         printf("%s", line);
 #endif
+        fprintf(output, "%s\n", data_bits);
         cur_addr += BYTES_PER_WORD;
     }
 }
@@ -261,36 +331,6 @@ char *replaceWord(const char *s, const char *oldW,
     return result;
 }
 
-char *laToLuiOri(char *seg)
-{
-    char *result = seg;
-
-    for (int i = 0; i < (int)symbol_table_cur_index; i++)
-    {
-        if (strstr(seg, SYMBOL_TABLE[i].name) != NULL)
-        {
-
-            if (SYMBOL_TABLE[i].address >= 0x00010000)
-            {
-                result = replaceWord(result, "la", "lui");
-            }
-            else
-            {
-                result = replaceWord(result, "la", "ori");
-            }
-
-            char temp_address[32];
-            sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
-
-            // printf("%s\n", temp_address);
-            result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
-            break;
-        }
-    }
-
-    return result;
-}
-
 /* Fill the blanks */
 void make_binary_file(FILE *output)
 {
@@ -307,13 +347,85 @@ void make_binary_file(FILE *output)
 #endif
 
     /* Print text section size and data section size */
-    /* blank */
+    fprintf(output, "%s\n", num_to_bits(text_section_size, 32));
+    fprintf(output, "%s\n", num_to_bits(data_section_size, 32));
 
     /* Print .text section */
     record_text_section(output);
 
     /* Print .data section */
     record_data_section(output);
+}
+
+void replaceVariable(FILE *text_seg)
+{
+    char line[1024] = {0};
+    rewind(text_seg);
+
+    char seg_string[2048] = {0};
+
+    while (fgets(line, 1024, text_seg) != NULL)
+    {
+        strcat(seg_string, line);
+    }
+
+    char *result = seg_string;
+
+    for (int i = 0; i < symbol_table_cur_index; i++)
+    {
+        char temp_address[32];
+        sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
+        result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
+    }
+
+    fclose(text_seg);
+    text_seg = tmpfile();
+    rewind(text_seg);
+    fprintf(text_seg, "%s", result);
+}
+
+void laToLuiOri(FILE *text_seg)
+{
+    char line[1024] = {0};
+    rewind(text_seg);
+
+    char seg_string[2048] = {0};
+
+    while (fgets(line, 1024, text_seg) != NULL)
+    {
+        char wLine[32] = {0};
+        if (line[0] == 'l' && line[1] == 'a')
+        {
+            char temp_line[64];
+            int temp_reg = 0;
+            int temp_addr = 0;
+            sscanf(line, "%s $%d, 0x%8x", temp_line, &temp_reg, &temp_addr);
+            sscanf(line, "%s %[^\n]", temp_line, temp_line);
+
+            if (temp_addr >= 0x0001)
+            {
+                strcpy(wLine, "lui\t");
+                strcat(wLine, temp_line);
+            }
+            else
+            {
+                strcpy(wLine, "ori\t");
+                strcat(wLine, temp_line);
+            }
+            strcat(wLine, "\n");
+        }
+        else
+        {
+            strcpy(wLine, line);
+        }
+
+        strcat(seg_string, wLine);
+    }
+
+    fclose(text_seg);
+    text_seg = tmpfile();
+    rewind(text_seg);
+    fprintf(text_seg, "%s", seg_string);
 }
 
 /* Fill the blanks */
@@ -369,7 +481,6 @@ void make_symbol_table(FILE *input)
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
             }
-
             fprintf(data_seg, "%s\n", temp_seg);
 
             data_section_size += BYTES_PER_WORD;
@@ -394,20 +505,7 @@ void make_symbol_table(FILE *input)
             else
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
-                char *result;
-                if (strstr(temp_seg, "la") != NULL)
-                {
-                    result = laToLuiOri(temp_seg);
-                }
-                else
-                {
-                    result = malloc(sizeof(char) * 32);
-                    strcpy(result, temp_seg);
-                }
-
-                fprintf(text_seg, "%s\n", result);
-                free(result);
-
+                fprintf(text_seg, "%s\n", temp_seg);
                 text_section_size += BYTES_PER_WORD;
             }
         }
@@ -415,21 +513,8 @@ void make_symbol_table(FILE *input)
         address += BYTES_PER_WORD;
     }
 
-    rewind(data_seg);
-    rewind(text_seg);
-
-    printf("data_seg\n");
-    while (fgets(line, 1024, data_seg) != NULL)
-    {
-        printf("%s", line);
-    }
-
-    printf("text_seg\n");
-    while (fgets(line, 1024, text_seg) != NULL)
-    {
-
-        printf("%s", line);
-    }
+    replaceVariable(text_seg);
+    laToLuiOri(text_seg);
 }
 
 /******************************************************
