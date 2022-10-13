@@ -142,27 +142,7 @@ int strToInt(char *num)
 {
     if (num[0] == '0' && num[1] == 'x')
     {
-        char *ptr = num;
-        ptr += 2;
-        int n = 0;
-
-        while (*ptr)
-        {
-            if (*ptr >= 'A' && *ptr <= 'F')
-            {
-                n = n * 16 + *ptr - 'A' + 10;
-            }
-            else if (*ptr >= '0' && *ptr <= '9')
-            {
-                n = n * 16 + *ptr - '0';
-            }
-            else
-            {
-                return NULL;
-            }
-            ptr++;
-        }
-        return n;
+        return (int)strtol(num, NULL, 16);
     }
     else
     {
@@ -173,7 +153,7 @@ int strToInt(char *num)
 /* Record .text section to output file */
 void record_text_section(FILE *output)
 {
-    uint32_t cur_addr = MEM_TEXT_START;
+    uint32_t cur_addr = MEM_TEXT_START + BYTES_PER_WORD;
     char line[1024];
 
     /* Point to text_seg stream */
@@ -194,6 +174,14 @@ void record_text_section(FILE *output)
 #if DEBUG
         printf("0x%08x: ", cur_addr);
 #endif
+
+        for (int i = 0; i < symbol_table_cur_index; i++)
+        {
+            if (cur_addr == SYMBOL_TABLE[i].address)
+            {
+                cur_addr += BYTES_PER_WORD;
+            }
+        }
 
         char inst_bits[33];
         inst_bits[0] = '\0';
@@ -239,12 +227,13 @@ void record_text_section(FILE *output)
                 sscanf(line, "%[^\t] $%[^,], $%[^,], $%[^\n]", temp_inst, temp_rd, temp_rs, temp_rt);
             }
 
+            strcpy(op, inst_list[idx].op);
             rs = strToInt(temp_rs);
             rt = strToInt(temp_rt);
             rd = strToInt(temp_rd);
             shamt = strToInt(temp_shamt);
 
-            strcat(inst_bits, inst_list[idx].op);
+            strcat(inst_bits, op);
             strcat(inst_bits, num_to_bits(rs, 5));
             strcat(inst_bits, num_to_bits(rt, 5));
             strcat(inst_bits, num_to_bits(rd, 5));
@@ -254,8 +243,6 @@ void record_text_section(FILE *output)
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d rd:$%d shamt:%d funct:%s\n",
                    op, rs, rt, rd, shamt, inst_list[idx].funct);
-            printf("op:%s rs:$%s rt:$%s rd:$%s shamt:%s funct:%s\n",
-                   op, temp_rs, temp_rt, temp_rd, temp_shamt, inst_list[idx].funct);
 #endif
             break;
 
@@ -275,40 +262,52 @@ void record_text_section(FILE *output)
             {
                 sscanf(line, "%[^\t] $%[^,], $%[^,], %[^\n]", temp_inst, temp_rs, temp_rt, temp_imm);
             }
-
             else
             {
                 sscanf(line, "%[^\t] $%[^,], $%[^,], %[^\n]", temp_inst, temp_rt, temp_rs, temp_imm);
             }
 
+            strcpy(op, inst_list[idx].op);
             rs = strToInt(temp_rs);
             rt = strToInt(temp_rt);
             imm = strToInt(temp_imm);
 
-            printf("----------------rs: %d, rt: %d-------------------------\n", rs, rt);
-
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(rs, 5));
             strcat(inst_bits, num_to_bits(rt, 5));
-            strcat(inst_bits, num_to_bits(imm, 16));
+
+            if (strcmp(op, "000100") == 0)
+            {
+                strcat(inst_bits, num_to_bits((imm - cur_addr) / 4 - 1, 16));
+            }
+            else if (strcmp(op, "000101") == 0)
+            {
+                strcat(inst_bits, num_to_bits((imm - cur_addr) / 4, 16));
+            }
+            else
+            {
+                strcat(inst_bits, num_to_bits(imm, 16));
+            }
+
 #if DEBUG
             printf("op:%s rs:$%d rt:$%d imm:0x%x\n",
                    op, rs, rt, imm);
-            printf("op:%s rs:$%s rt:$%s imm:%s\n",
-                   op, temp_rs, temp_rt, temp_imm);
+
 #endif
             break;
 
         case 'J':
             sscanf(line, "%[^\t] %[^\n]", temp_inst, temp_addr);
 
+            strcpy(op, inst_list[idx].op);
             addr = strToInt(temp_addr);
+            addr /= 4;
+            addr -= 1;
 
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(addr, 26));
 #if DEBUG
             printf("op:%s addr:%i\n", op, addr);
-            printf("op:%s addr:%s\n", op, temp_addr);
 #endif
             break;
 
@@ -437,6 +436,7 @@ void replaceVariable(FILE *text_seg)
     for (int i = 0; i < symbol_table_cur_index; i++)
     {
         char temp_address[32];
+
         sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
         result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
     }
@@ -449,6 +449,8 @@ void replaceVariable(FILE *text_seg)
 
 void laToLuiOri(FILE *text_seg)
 {
+    uint32_t cur_address = MEM_TEXT_START;
+
     char line[1024] = {0};
     rewind(text_seg);
 
@@ -469,10 +471,8 @@ void laToLuiOri(FILE *text_seg)
             strncpy(temp_upper, temp_line + (strlen(temp_line) - 8), 4);
             strncpy(temp_lower, temp_line + (strlen(temp_line) - 4), 4);
 
-            printf("upper %s, lower %s rs: %d\n", temp_upper, temp_lower, temp_reg);
-
             int upper_flag = 0;
-            if (strcmp(temp_upper, "0000") != 0)
+            if ((strcmp(temp_upper, "0000")) != 0)
             {
                 sprintf(temp_line, "lui\t$%d, 0x%s\n", temp_reg, temp_upper);
                 strcat(wLine, temp_line);
@@ -481,18 +481,15 @@ void laToLuiOri(FILE *text_seg)
 
             if (strcmp(temp_lower, "0000") != 0 || upper_flag == 0)
             {
-                sprintf(temp_line, "ori\t$%d, $%d 0x%s\n", temp_reg, temp_reg, temp_lower);
+                sprintf(temp_line, "ori\t$%d, $%d, 0x%s\n", temp_reg, temp_reg, temp_lower);
                 strcat(wLine, temp_line);
-                if (upper_flag == 1)
-                {
-                    text_section_size += BYTES_PER_WORD;
-                }
             }
         }
         else
         {
             strcpy(wLine, line);
         }
+        cur_address += BYTES_PER_WORD;
 
         strcat(seg_string, wLine);
     }
@@ -554,6 +551,7 @@ void make_symbol_table(FILE *input)
             }
             else
             {
+
                 sscanf(line, "\t%[^\n]", temp_seg);
             }
             fprintf(data_seg, "%s\n", temp_seg);
@@ -580,6 +578,25 @@ void make_symbol_table(FILE *input)
             else
             {
                 sscanf(line, "\t%[^\n]", temp_seg);
+
+                if (temp_seg[0] == 'l' && temp_seg[1] == 'a')
+                {
+                    char temp_l[32] = {0};
+                    sscanf(temp_seg, "%[^,], %[^\n]", temp_l, temp_l);
+
+                    for (int i = 0; i < symbol_table_cur_index; i++)
+                    {
+                        if (strcmp(SYMBOL_TABLE[i].name, temp_l) == 0)
+                        {
+
+                            if ((SYMBOL_TABLE[i].address & 0xFFFF0000) != 0 && (SYMBOL_TABLE[i].address & 0x0000FFFF) != 0)
+                            {
+                                text_section_size += BYTES_PER_WORD;
+                                address += BYTES_PER_WORD;
+                            }
+                        }
+                    }
+                }
                 fprintf(text_seg, "%s\n", temp_seg);
                 text_section_size += BYTES_PER_WORD;
             }
@@ -662,6 +679,11 @@ int main(int argc, char *argv[])
 
     fclose(input);
     fclose(output);
+
+    for (int i = 0; i < symbol_table_cur_index; i++)
+    {
+        printf("name: %s\taddress: %0x\n", SYMBOL_TABLE[i].name, SYMBOL_TABLE[i].address);
+    }
 
     return 0;
 }
