@@ -9,7 +9,7 @@
  * For debug option. If you want to debug, set 1.
  * If not, set 0.
  */
-#define DEBUG 1
+#define DEBUG 0
 
 #define MAX_SYMBOL_TABLE_SIZE 1024
 #define MEM_TEXT_START 0x00400000
@@ -72,10 +72,6 @@ inst_t inst_list[INST_LIST_LEN] = {
     {"subu", "000000", 'R', "100011"}  //   21      rd rs rt
 };
 
-// r except: jr, srl, sll
-// i -> default rt rs imm,
-// except lui rt imm / lw, sw rt imm(rs) /
-// j default
 symbol_t SYMBOL_TABLE[MAX_SYMBOL_TABLE_SIZE]; // Global Symbol Table
 
 uint32_t symbol_table_cur_index = 0; // For indexing of symbol table
@@ -153,7 +149,7 @@ int strToInt(char *num)
 /* Record .text section to output file */
 void record_text_section(FILE *output)
 {
-    uint32_t cur_addr = MEM_TEXT_START + BYTES_PER_WORD;
+    uint32_t cur_addr = MEM_TEXT_START;
     char line[1024];
 
     /* Point to text_seg stream */
@@ -174,14 +170,6 @@ void record_text_section(FILE *output)
 #if DEBUG
         printf("0x%08x: ", cur_addr);
 #endif
-
-        for (int i = 0; i < symbol_table_cur_index; i++)
-        {
-            if (cur_addr == SYMBOL_TABLE[i].address)
-            {
-                cur_addr += BYTES_PER_WORD;
-            }
-        }
 
         char inst_bits[33];
         inst_bits[0] = '\0';
@@ -276,14 +264,12 @@ void record_text_section(FILE *output)
             strcat(inst_bits, num_to_bits(rs, 5));
             strcat(inst_bits, num_to_bits(rt, 5));
 
-            if (strcmp(op, "000100") == 0)
+            if (strcmp(op, "000100") == 0 || strcmp(op, "000101") == 0)
             {
+
                 strcat(inst_bits, num_to_bits((imm - cur_addr) / 4 - 1, 16));
             }
-            else if (strcmp(op, "000101") == 0)
-            {
-                strcat(inst_bits, num_to_bits((imm - cur_addr) / 4, 16));
-            }
+
             else
             {
                 strcat(inst_bits, num_to_bits(imm, 16));
@@ -301,8 +287,8 @@ void record_text_section(FILE *output)
 
             strcpy(op, inst_list[idx].op);
             addr = strToInt(temp_addr);
-            addr /= 4;
-            addr -= 1;
+
+            addr >>= 2;
 
             strcat(inst_bits, inst_list[idx].op);
             strcat(inst_bits, num_to_bits(addr, 26));
@@ -324,7 +310,7 @@ void record_text_section(FILE *output)
 /* Record .data section to output file */
 void record_data_section(FILE *output)
 {
-    uint32_t cur_addr = MEM_DATA_START;
+    uint32_t cur_addr = MEM_DATA_START + BYTES_PER_WORD;
     char line[1024];
 
     /* Point to data segment stream */
@@ -428,18 +414,42 @@ void replaceVariable(FILE *text_seg)
 
     while (fgets(line, 1024, text_seg) != NULL)
     {
-        strcat(seg_string, line);
+        char temp_inst[16] = {0};
+        char temp_var[16] = {0};
+        char *temp_line = line;
+
+        sscanf(line, "%[^\t]", temp_inst);
+
+        if (strcmp(temp_inst, "beq") == 0 || strcmp(temp_inst, "bne") == 0)
+        {
+            sscanf(line, "%[^\t]\t$%[^,], $%[^,], %s", temp_inst, temp_var, temp_var, temp_var);
+        }
+        else if (strcmp(temp_inst, "la") == 0)
+        {
+            sscanf(line, "%[^\t]\t$%[^,], %s", temp_inst, temp_var, temp_var);
+        }
+        else if (strcmp(temp_inst, "j") == 0 || strcmp(temp_inst, "jal") == 0)
+        {
+            sscanf(line, "%[^\t]\t%s", temp_inst, temp_var);
+        }
+
+        if (strcmp(temp_var, "") != 0)
+        {
+            char temp_address[32];
+            for (int i = 0; i < symbol_table_cur_index; i++)
+            {
+                if (strcmp(temp_var, SYMBOL_TABLE[i].name) == 0)
+                {
+                    sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
+                    temp_line = replaceWord(line, temp_var, temp_address);
+                }
+            }
+        }
+
+        strcat(seg_string, temp_line);
     }
 
     char *result = seg_string;
-
-    for (int i = 0; i < symbol_table_cur_index; i++)
-    {
-        char temp_address[32];
-
-        sprintf(temp_address, "0x%x", SYMBOL_TABLE[i].address);
-        result = replaceWord(result, SYMBOL_TABLE[i].name, temp_address);
-    }
 
     fclose(text_seg);
     text_seg = tmpfile();
@@ -472,7 +482,7 @@ void laToLuiOri(FILE *text_seg)
             strncpy(temp_lower, temp_line + (strlen(temp_line) - 4), 4);
 
             int upper_flag = 0;
-            if ((strcmp(temp_upper, "0000")) != 0)
+            if (strcmp(temp_upper, "0000") != 0)
             {
                 sprintf(temp_line, "lui\t$%d, 0x%s\n", temp_reg, temp_upper);
                 strcat(wLine, temp_line);
@@ -560,7 +570,7 @@ void make_symbol_table(FILE *input)
         }
         else if (cur_section == TEXT)
         {
-            if (address > MEM_DATA_START)
+            if (address > MEM_DATA_START || address == 0)
             {
                 address = MEM_TEXT_START;
             }
@@ -574,6 +584,7 @@ void make_symbol_table(FILE *input)
                 new_symbol.address = address;
 
                 symbol_table_add_entry(new_symbol);
+                continue;
             }
             else
             {
@@ -679,11 +690,6 @@ int main(int argc, char *argv[])
 
     fclose(input);
     fclose(output);
-
-    for (int i = 0; i < symbol_table_cur_index; i++)
-    {
-        printf("name: %s\taddress: %0x\n", SYMBOL_TABLE[i].name, SYMBOL_TABLE[i].address);
-    }
 
     return 0;
 }
